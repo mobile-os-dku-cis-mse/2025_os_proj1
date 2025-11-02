@@ -5,6 +5,10 @@
 #include <signal.h>
 #include <stdbool.h>
 
+#define MIN_CPU_BURST       5
+#define MAX_CPU_BURST       20
+#define MIN_IO_BURST        3
+#define MAX_IO_BURST        15
 #define NUM_CHILDREN        10
 
 typedef enum {
@@ -86,5 +90,6 @@ int send_terminate(int msgqid, pid_t target_pid);
 int receive_io_request(int msgqid, message *msg);
 int child_receive_message(int msgqid, pid_t my_pid, message *msg);
 int child_send_io_request(int msgqid, int io_burst, pid_t my_pid);
+int generate_random_burst(int min, int max);
 
 #endif
