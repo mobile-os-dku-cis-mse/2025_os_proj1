@@ -1,7 +1,9 @@
 #ifndef INC_2025_OS_PROJ1_SCHEDULER_H
 #define INC_2025_OS_PROJ1_SCHEDULER_H
 
+#include <stdio.h>
 #include <signal.h>
+#include <stdbool.h>
 
 #define NUM_CHILDREN        10
 
@@ -38,5 +40,16 @@ typedef struct {
     int rear;
     int count;
 } ready_queue;
+
+typedef struct wait_node {
+    process_control_block *pcb;
+    struct wait_node *next;
+} wait_node;
+
+typedef struct {
+    wait_node *head;
+    wait_node *tail;
+    int count;
+} wait_queue;
 
 #endif
