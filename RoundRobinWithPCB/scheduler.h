@@ -15,6 +15,10 @@ typedef enum {
     PROCESS_TERMINATED
 } process_state;
 
+#define MSG_TIME_SLICE      1
+#define MSG_IO_REQUEST      2
+#define MSG_TERMINATE       3
+
 typedef struct {
     int pcb_index;
     pid_t pid;
@@ -51,5 +55,14 @@ typedef struct {
     wait_node *tail;
     int count;
 } wait_queue;
+
+typedef struct {
+    long mtype;
+    struct {
+        int command;
+        int value;
+        pid_t sender_pid;
+    } data;
+} message;
 
 #endif
