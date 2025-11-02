@@ -65,4 +65,26 @@ typedef struct {
     } data;
 } message;
 
+void init_ready_queue(ready_queue *queue);
+bool is_ready_queue_empty(const ready_queue *queue);
+bool is_ready_queue_empty(const ready_queue *queue);
+bool is_ready_queue_full(const ready_queue *queue);
+int enqueue_ready(ready_queue *queue, process_control_block *pcb);
+process_control_block* dequeue_ready(ready_queue *queue);
+void update_ready_queue_waiting_times(ready_queue *queue);
+process_control_block* remove_from_ready_queue(ready_queue *queue, pid_t pid);
+
+void init_wait_queue(wait_queue *queue);
+bool is_wait_queue_empty(const wait_queue *queue);
+int enqueue_wait(wait_queue *queue, process_control_block *pcb);
+process_control_block* dequeue_wait(wait_queue *queue);
+process_control_block* remove_from_wait_queue(wait_queue *queue, pid_t pid);
+
+int create_message_queue(void);
+int send_time_slice(int msgqid, pid_t target_pid);
+int send_terminate(int msgqid, pid_t target_pid);
+int receive_io_request(int msgqid, message *msg);
+int child_receive_message(int msgqid, pid_t my_pid, message *msg);
+int child_send_io_request(int msgqid, int io_burst, pid_t my_pid);
+
 #endif
