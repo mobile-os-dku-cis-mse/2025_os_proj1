@@ -3,6 +3,8 @@
 
 #include <signal.h>
 
+#define NUM_CHILDREN        10
+
 typedef enum {
     PROCESS_NEW,
     PROCESS_READY,
@@ -29,5 +31,12 @@ typedef struct {
     int first_run_time;
     int completion_time;
 } process_control_block;
+
+typedef struct {
+    process_control_block *processes[NUM_CHILDREN];
+    int front;
+    int rear;
+    int count;
+} ready_queue;
 
 #endif
