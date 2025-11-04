@@ -5,10 +5,6 @@
 
 volatile sig_atomic_t child_should_terminate = 0;
 
-int generate_random_burst(int min, int max) {
-    return min + (rand() % (max - min + 1));
-}
-
 void child_signal_handler(int signo) {
 }
 

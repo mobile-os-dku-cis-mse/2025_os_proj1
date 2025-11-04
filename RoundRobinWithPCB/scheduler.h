@@ -5,11 +5,18 @@
 #include <signal.h>
 #include <stdbool.h>
 
+#define TIME_QUANTUM        3
+#define TICK_INTERVAL_US    10000
+#define MAX_TICKS           10000
 #define MIN_CPU_BURST       5
 #define MAX_CPU_BURST       20
 #define MIN_IO_BURST        3
 #define MAX_IO_BURST        15
 #define NUM_CHILDREN        10
+
+#define MSG_TIME_SLICE      1
+#define MSG_IO_REQUEST      2
+#define MSG_TERMINATE       3
 
 typedef enum {
     PROCESS_NEW,
@@ -18,10 +25,6 @@ typedef enum {
     PROCESS_WAITING,
     PROCESS_TERMINATED
 } process_state;
-
-#define MSG_TIME_SLICE      1
-#define MSG_IO_REQUEST      2
-#define MSG_TERMINATE       3
 
 typedef struct {
     int pcb_index;
@@ -69,6 +72,22 @@ typedef struct {
     } data;
 } message;
 
+typedef struct {
+    process_control_block pcb_table[NUM_CHILDREN];
+
+    ready_queue ready_queue;
+    wait_queue wait_queue;
+
+    process_control_block *current_cpu_process;
+
+    int current_tick;
+    int msgqid;
+    bool running;
+    FILE *log_file;
+
+    int total_context_switches;
+} scheduler;
+
 void init_ready_queue(ready_queue *queue);
 bool is_ready_queue_empty(const ready_queue *queue);
 bool is_ready_queue_empty(const ready_queue *queue);
@@ -91,5 +110,7 @@ int receive_io_request(int msgqid, message *msg);
 int child_receive_message(int msgqid, pid_t my_pid, message *msg);
 int child_send_io_request(int msgqid, int io_burst, pid_t my_pid);
 int generate_random_burst(int min, int max);
+
+extern scheduler global_scheduler;
 
 #endif
