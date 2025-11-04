@@ -107,10 +107,16 @@ bool is_wait_queue_empty(const wait_queue *queue);
 int enqueue_wait(wait_queue *queue, process_control_block *pcb);
 process_control_block* dequeue_wait(wait_queue *queue);
 process_control_block* remove_from_wait_queue(wait_queue *queue, pid_t pid);
+void update_wait_queue_io_bursts(wait_queue *queue, ready_queue *ready_queue);
 
 void init_scheduler(scheduler *scheduler);
 void cleanup_scheduler(scheduler *scheduler);
 int generate_random_burst(int min, int max);
+void schedule_next_process(scheduler *scheduler);
+void handle_time_slice_complete(scheduler *scheduler);
+void handle_io_request(scheduler *scheduler, const message *msg);
+void process_timer_tick(scheduler *scheduler);
+void create_child_processes(scheduler *sched);
 
 int create_message_queue(void);
 int send_time_slice(int msgqid, pid_t target_pid);

@@ -60,6 +60,99 @@ void init_scheduler(scheduler *scheduler) {
     scheduler->total_context_switches = 0;
 }
 
+void schedule_next_process(scheduler *scheduler) {
+    process_control_block *next_pcb = dequeue_ready(&scheduler->ready_queue);
+
+    if (next_pcb != NULL) {
+        scheduler->current_cpu_process = next_pcb;
+        scheduler->current_cpu_process->remaining_quantum = TIME_QUANTUM;
+        update_pcb_state(scheduler->current_cpu_process, PROCESS_RUNNING);
+
+        if (scheduler->current_cpu_process->first_run_time == -1) {
+            scheduler->current_cpu_process->first_run_time = scheduler->current_tick;
+            scheduler->current_cpu_process->response_time =
+                scheduler->current_tick - scheduler->current_cpu_process->arrival_time;
+        }
+
+        scheduler->total_context_switches++;
+
+        send_time_slice(scheduler->msgqid, scheduler->current_cpu_process->pid);
+    } else {
+        scheduler->current_cpu_process = NULL;
+    }
+}
+
+void handle_time_slice_complete(scheduler *scheduler) {
+    if (scheduler->current_cpu_process == NULL) {
+        return;
+    }
+
+    if (scheduler->current_cpu_process->cpu_burst > 0) {
+        update_pcb_state(scheduler->current_cpu_process, PROCESS_READY);
+        enqueue_ready(&scheduler->ready_queue, scheduler->current_cpu_process);
+    } else if (scheduler->current_cpu_process->state == PROCESS_TERMINATED) {
+        scheduler->current_cpu_process->completion_time = scheduler->current_tick;
+    }
+
+    scheduler->current_cpu_process = NULL;
+    schedule_next_process(scheduler);
+}
+
+void handle_io_request(scheduler *scheduler, const message *msg) {
+    pid_t requesting_pid = msg->data.sender_pid;
+    int io_burst = msg->data.value;
+
+    process_control_block *pcb = find_pcb_by_pid(scheduler, requesting_pid);
+    if (pcb == NULL) {
+        fprintf(stderr, "[ERROR] I/O request from unknown process: %d\n", requesting_pid);
+        return;
+    }
+
+    pcb->io_burst = io_burst;
+
+    if (scheduler->current_cpu_process == pcb) {
+        update_pcb_state(pcb, PROCESS_WAITING);
+        enqueue_wait(&scheduler->wait_queue, pcb);
+        scheduler->current_cpu_process = NULL;
+        schedule_next_process(scheduler);
+    }else if (pcb->state == PROCESS_READY) {
+        process_control_block *removed_pcb = remove_from_ready_queue(&scheduler->ready_queue, requesting_pid);
+        if (removed_pcb != NULL) {
+            update_pcb_state(removed_pcb, PROCESS_WAITING);
+            enqueue_wait(&scheduler->wait_queue, removed_pcb);
+        }
+    }
+}
+
+void process_timer_tick(scheduler *scheduler) {
+    scheduler->current_tick++;
+
+    update_wait_queue_io_bursts(&scheduler->wait_queue, &scheduler->ready_queue);
+    update_ready_queue_waiting_times(&scheduler->ready_queue);
+
+    message msg;
+    while (receive_io_request(scheduler->msgqid, &msg) == 0) {
+        handle_io_request(scheduler, &msg);
+    }
+
+    if (scheduler->current_cpu_process != NULL) {
+        send_time_slice(scheduler->msgqid, scheduler->current_cpu_process->pid);
+
+        scheduler->current_cpu_process->remaining_quantum--;
+        scheduler->current_cpu_process->total_cpu_time++;
+
+        if (scheduler->current_cpu_process->cpu_burst > 0) {
+            scheduler->current_cpu_process->cpu_burst--;
+        }
+
+        if (scheduler->current_cpu_process->remaining_quantum <= 0) {
+            handle_time_slice_complete(scheduler);
+        }
+    } else {
+        schedule_next_process(scheduler);
+    }
+}
+
 void cleanup_scheduler(scheduler *scheduler) {
     for (int i = 0; i < NUM_CHILDREN; i++) {
         if (scheduler->pcb_table[i].pid > 0 &&
