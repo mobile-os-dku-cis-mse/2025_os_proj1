@@ -128,6 +128,11 @@ int generate_random_burst(int min, int max);
 
 void child_process_main(int msgqid, pid_t my_pid);
 
+void setup_signal_handlers(void);
+void timer_signal_handler(int signo);
+void child_signal_handler(int signo);
+
+extern volatile sig_atomic_t global_timeout;
 extern scheduler global_scheduler;
 
 #endif
