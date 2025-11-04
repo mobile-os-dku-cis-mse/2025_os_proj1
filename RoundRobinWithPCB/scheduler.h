@@ -88,6 +88,11 @@ typedef struct {
     int total_context_switches;
 } scheduler;
 
+void init_pcb_table(scheduler *scheduler);
+process_control_block* find_pcb_by_pid(scheduler *scheduler, pid_t pid);
+process_control_block* allocate_pcb(scheduler *scheduler);
+void update_pcb_state(process_control_block *pcb, process_state new_state);
+
 void init_ready_queue(ready_queue *queue);
 bool is_ready_queue_empty(const ready_queue *queue);
 bool is_ready_queue_empty(const ready_queue *queue);
@@ -103,6 +108,10 @@ int enqueue_wait(wait_queue *queue, process_control_block *pcb);
 process_control_block* dequeue_wait(wait_queue *queue);
 process_control_block* remove_from_wait_queue(wait_queue *queue, pid_t pid);
 
+void init_scheduler(scheduler *scheduler);
+void cleanup_scheduler(scheduler *scheduler);
+int generate_random_burst(int min, int max);
+
 int create_message_queue(void);
 int send_time_slice(int msgqid, pid_t target_pid);
 int send_terminate(int msgqid, pid_t target_pid);
@@ -110,6 +119,8 @@ int receive_io_request(int msgqid, message *msg);
 int child_receive_message(int msgqid, pid_t my_pid, message *msg);
 int child_send_io_request(int msgqid, int io_burst, pid_t my_pid);
 int generate_random_burst(int min, int max);
+
+void child_process_main(int msgqid, pid_t my_pid);
 
 extern scheduler global_scheduler;
 
