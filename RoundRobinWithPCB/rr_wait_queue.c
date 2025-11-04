@@ -94,3 +94,68 @@ process_control_block* remove_from_wait_queue(wait_queue *queue, pid_t pid) {
     
     return NULL;
 }
+
+void update_wait_queue_io_bursts(wait_queue *queue, ready_queue *ready_queue) {
+    if (is_wait_queue_empty(queue)) {
+        return;
+    }
+
+    wait_node *current = queue->head;
+    wait_node *prev = NULL;
+
+    while (current != NULL) {
+        if (current->pcb == NULL) {
+            wait_node *to_remove = current;
+            if (prev == NULL) {
+                queue->head = current->next;
+            } else {
+                prev->next = current->next;
+            }
+            if (current == queue->tail) {
+                queue->tail = prev;
+            }
+            current = current->next;
+            free(to_remove);
+            queue->count--;
+            continue;
+        }
+
+        current->pcb->io_burst--;
+        current->pcb->total_io_time++;
+
+        if (current->pcb->io_burst <= 0) {
+            process_control_block *pcb = current->pcb;
+
+            pcb->cpu_burst = generate_random_burst(MIN_CPU_BURST, MAX_CPU_BURST);
+            pcb->remaining_quantum = TIME_QUANTUM;
+            pcb->waiting_time = 0;
+
+            if (enqueue_ready(ready_queue, pcb) == 0) {
+                wait_node *remove = current;
+
+                if (prev == NULL) {
+                    queue->head = current->next;
+                    if (queue->head == NULL) {
+                        queue->tail = NULL;
+                    }
+                    current = queue->head;
+                } else {
+                    prev->next = current->next;
+                    if (current == queue->tail) {
+                        queue->tail = prev;
+                    }
+                    current = current->next;
+                }
+
+                free(remove);
+                queue->count--;
+                continue;
+            } else {
+                fprintf(stderr, "[WARNING] Failed to move process %d from wait to ready queue\n", pcb->pid);
+            }
+        }
+
+        prev = current;
+        current = current->next;
+    }
+}
