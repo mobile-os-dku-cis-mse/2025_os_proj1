@@ -90,9 +90,15 @@ void handle_time_slice_complete(scheduler *scheduler) {
     if (scheduler->current_cpu_process->cpu_burst > 0) {
         update_pcb_state(scheduler->current_cpu_process, PROCESS_READY);
         enqueue_ready(&scheduler->ready_queue, scheduler->current_cpu_process);
-    } else if (scheduler->current_cpu_process->state == PROCESS_TERMINATED) {
-        scheduler->current_cpu_process->completion_time = scheduler->current_tick;
+    } else {
+        scheduler-> current_cpu_process-> cpu_burst = generate_random_burst(MIN_CPU_BURST,MAX_CPU_BURST);
+        update_pcb_state(scheduler->current_cpu_process, PROCESS_READY);
+        enqueue_ready(&scheduler->ready_queue, scheduler->current_cpu_process);
     }
+
+    // else if (scheduler->current_cpu_process->state == PROCESS_TERMINATED) {
+    //     scheduler->current_cpu_process->completion_time = scheduler->current_tick;
+    // }
 
     scheduler->current_cpu_process = NULL;
     schedule_next_process(scheduler);
@@ -151,6 +157,10 @@ void process_timer_tick(scheduler *scheduler) {
     } else {
         schedule_next_process(scheduler);
     }
+
+    if (scheduler->current_tick <= MAX_TICKS) {
+        log_scheduling_event(scheduler);
+    }
 }
 
 void cleanup_scheduler(scheduler *scheduler) {
@@ -174,6 +184,8 @@ void cleanup_scheduler(scheduler *scheduler) {
         free(current);
         current = next;
     }
+
+    close_log_file(scheduler);
 
     if (scheduler->msgqid >= 0) {
         msgctl(scheduler->msgqid, IPC_RMID, NULL);

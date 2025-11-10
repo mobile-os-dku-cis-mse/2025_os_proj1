@@ -35,6 +35,8 @@ int enqueue_ready(ready_queue *queue, process_control_block *pcb) {
     queue->processes[queue->rear] = pcb;
     queue->count++;
 
+    update_pcb_state(pcb, PROCESS_READY);
+
     return 0;
 }
 
