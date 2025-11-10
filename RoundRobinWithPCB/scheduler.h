@@ -18,6 +18,8 @@
 #define MSG_IO_REQUEST      2
 #define MSG_TERMINATE       3
 
+#define LOG_FILE            "schedule_dump.txt"
+
 typedef enum {
     PROCESS_NEW,
     PROCESS_READY,
@@ -127,6 +129,13 @@ int child_send_io_request(int msgqid, int io_burst, pid_t my_pid);
 int generate_random_burst(int min, int max);
 
 void child_process_main(int msgqid, pid_t my_pid);
+
+void open_log_file(scheduler *sched);
+void close_log_file(scheduler *scheduler);
+void log_scheduling_event(scheduler *scheduler);
+void dump_ready_queue(FILE *fp, const ready_queue *queue);
+void dump_wait_queue(FILE *fp, const wait_queue *queue);
+void print_final_statistics(const scheduler *sched);
 
 void setup_signal_handlers(void);
 void timer_signal_handler(int signo);

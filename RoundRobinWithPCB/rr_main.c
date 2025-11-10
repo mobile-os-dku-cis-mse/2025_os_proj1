@@ -29,6 +29,20 @@ void setup_signal_handlers(void) {
     signal(SIGCHLD, SIG_IGN);
 }
 
+void setup_timer(void) {
+    struct itimerval timer;
+
+    timer.it_value.tv_sec = 0;
+    timer.it_value.tv_usec = TICK_INTERVAL_US;
+    timer.it_interval.tv_sec = 0;
+    timer.it_interval.tv_usec = TICK_INTERVAL_US;
+
+    if (setitimer(ITIMER_REAL, &timer, NULL) == -1) {
+        perror("setitimer");
+        exit(1);
+    }
+}
+
 void create_child_processes(scheduler *sched) {
     printf("Creating %d child processes...\n", NUM_CHILDREN);
     
@@ -65,10 +79,13 @@ void create_child_processes(scheduler *sched) {
                 fprintf(stderr, "[ERROR] Failed to enqueue child process %d\n", pid);
                 exit(1);
             }
+
+            printf("  Created child process: PID=%d (PCB index=%d), Initial CPU burst=%d\n",
+                   pid, pcb->pcb_index, pcb->cpu_burst);
         }
     }
     
-    printf("All child processes created.\n\n");
+    printf("All child processes created successfully.\n\n");
 }
 
 int main(int argc, char *argv[]) {
@@ -81,10 +98,22 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Failed to create message queue\n");
         exit(1);
     }
+    printf("Message queue created: ID=%d\n\n", global_scheduler.msgqid);
+
+    open_log_file(&global_scheduler);
+    printf("Log file opened: %s\n\n", LOG_FILE);
 
     setup_signal_handlers();
+    printf("Signal handlers configured.\n\n");
+
     create_child_processes(&global_scheduler);
+
+    setup_timer();
+    printf("Timer started: %d microseconds per tick\n\n", TICK_INTERVAL_US);
+
     schedule_next_process(&global_scheduler);
+
+    printf("Starting simulation...\n");
 
     int min_ticks = 60 * 1000000 / TICK_INTERVAL_US;
     
@@ -92,10 +121,32 @@ int main(int argc, char *argv[]) {
         if (global_timeout) {
             global_timeout = 0;
             process_timer_tick(&global_scheduler);
+
+            if (global_scheduler.current_tick % 1000 == 0) {
+                printf("Progress: %d ticks (%.1f seconds)\n",
+                       global_scheduler.current_tick,
+                       global_scheduler.current_tick * TICK_INTERVAL_US / 1000000.0);
+            }
         }
         
         usleep(100);
     }
+
+    printf("\n");
+    printf("Simulation completed after %d ticks (%.2f seconds)\n",
+           global_scheduler.current_tick,
+           global_scheduler.current_tick * TICK_INTERVAL_US / 1000000.0);
+    printf("\n");
+
+    print_final_statistics(&global_scheduler);
+
+    printf("\nCleaning up...\n");
+    cleanup_scheduler(&global_scheduler);
+    printf("Cleanup completed.\n");
+
+    printf("\n=================================================\n");
+    printf("   Simulation Finished Successfully\n");
+    printf("=================================================\n");
     
     return 0;
 }
