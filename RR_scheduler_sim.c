@@ -21,6 +21,7 @@ struct msgbuf {
     long mtype;
     int pid;
     int io_time;
+    int cpu_remaining;
 };
 
 typedef struct {
@@ -136,6 +137,7 @@ void child_process(int index) {
     msg.mtype = 999;
     msg.pid = getpid();
     msg.io_time = io_burst;
+    msg.cpu_remaining = cpu_burst;
     msgsnd(msgq_id, &msg, sizeof(msg) - sizeof(long), 0);
     
     while (1) {
@@ -143,9 +145,17 @@ void child_process(int index) {
         ssize_t ret = msgrcv(msgq_id, &msg, sizeof(msg) - sizeof(long), getpid(), 0);
         if (ret < 0) break;
         
-        cpu_burst--;
+        if (cpu_burst > 0) {
+            cpu_burst--;
+        }
         
-        if (cpu_burst <= 0) {
+        memset(&msg, 0, sizeof(msg));
+        msg.mtype = 2;
+        msg.pid = getpid();
+        msg.cpu_remaining = cpu_burst;
+        msgsnd(msgq_id, &msg, sizeof(msg) - sizeof(long), IPC_NOWAIT);
+        
+        if (cpu_burst == 0) {
             io_burst = (rand() % 15) + 5;
             memset(&msg, 0, sizeof(msg));
             msg.mtype = 1;
@@ -158,6 +168,12 @@ void child_process(int index) {
             if (ret < 0) break;
             
             cpu_burst = (rand() % 20) + 10;
+            
+            memset(&msg, 0, sizeof(msg));
+            msg.mtype = 2;
+            msg.pid = getpid();
+            msg.cpu_remaining = cpu_burst;
+            msgsnd(msgq_id, &msg, sizeof(msg) - sizeof(long), IPC_NOWAIT);
         }
     }
     exit(0);
@@ -240,20 +256,34 @@ void schedule() {
         msg.io_time = 0;
         msgsnd(msgq_id, &msg, sizeof(msg) - sizeof(long), IPC_NOWAIT);
         
-        processes[current_process].cpu_burst--;
-        
         if (current_tick <= MAX_TICKS) {
-            char buffer[1024];
+            char buffer[2048];
             memset(buffer, 0, sizeof(buffer));
-            sprintf(buffer, "[%d] Process %d gets CPU, burst=%d, quantum=%d | RUN=", 
+            sprintf(buffer, "[Tick %5d] PID=%d CPU_burst=%2d Quantum=%d Wait_time=%d | RQ(size=%d)=", 
                     current_tick, 
                     processes[current_process].pid,
                     processes[current_process].cpu_burst,
-                    processes[current_process].remaining_quantum);
+                    processes[current_process].remaining_quantum,
+                    processes[current_process].waiting_time,
+                    run_queue.size);
             dump_queue(buffer, &run_queue);
-            strcat(buffer, " WAIT=");
-            dump_queue(buffer, &wait_queue);
-            strcat(buffer, "\n");
+            
+            char io_info[512] = "";
+            sprintf(io_info, " | WQ(size=%d)=", wait_queue.size);
+            strcat(buffer, io_info);
+            
+            node_t *curr = wait_queue.head;
+            strcat(buffer, "[");
+            while (curr != NULL) {
+                char temp[64];
+                sprintf(temp, "%d(io=%d)", 
+                        processes[curr->index].pid,
+                        processes[curr->index].io_burst);
+                strcat(buffer, temp);
+                if (curr->next != NULL) strcat(buffer, ",");
+                curr = curr->next;
+            }
+            strcat(buffer, "]\n");
             log_output(buffer);
         }
     }
@@ -324,11 +354,11 @@ int main() {
         if (msgrcv(msgq_id, &msg, sizeof(msg) - sizeof(long), 999, 0) > 0) {
             for (int j = 0; j < NUM_PROCESSES; j++) {
                 if (processes[j].pid == msg.pid) {
-                    processes[j].cpu_burst = (rand() % 20) + 10;
+                    processes[j].cpu_burst = msg.cpu_remaining;
                     processes[j].io_burst = msg.io_time;
                     processes[j].state = 1;
                     enqueue(&run_queue, j);
-                    printf("Process %d initialized\n", msg.pid);
+                    printf("Process %d initialized with cpu_burst=%d\n", msg.pid, msg.cpu_remaining);
                     break;
                 }
             }
@@ -349,7 +379,7 @@ int main() {
     timer.it_value.tv_usec = TIMER_TICK;
     setitimer(ITIMER_REAL, &timer, NULL);
     
-    printf("Scheduler running ...\n");
+    printf("Scheduler running for 60 seconds...\n");
     while (running) {
         pause();
     }
