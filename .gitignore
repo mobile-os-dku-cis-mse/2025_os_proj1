@@ -1,0 +1,4 @@
+build
+*.o
+os_proj1
+.idea
