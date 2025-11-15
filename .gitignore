@@ -2,3 +2,4 @@ build
 *.o
 os_proj1
 .idea
+schedule_dump.txt

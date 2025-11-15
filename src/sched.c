@@ -276,21 +276,16 @@ void child_loop() {
     }
 }
 
-// ======================= CODE DU PARENT =====================
-
 void parent_loop() {
-    // Ouverture du fichier de log
     log_fd = open(LOG_FILENAME, O_CREAT | O_TRUNC | O_WRONLY, 0644);
     if (log_fd < 0) {
         perror("open log file");
         exit(1);
     }
 
-    // Initialiser les queues
     queue_init(&runq);
     queue_init(&waitq);
 
-    // Mettre tous les enfants dans la run-queue au début
     for (int i = 0; i < NCHILD; ++i) {
         pcbs[i].in_io = 0;
         pcbs[i].remaining_io = 0;
@@ -300,34 +295,31 @@ void parent_loop() {
     }
     current_idx = -1;
 
-    // Installer le handler SIGALRM
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = timer_handler;
     sigaction(SIGALRM, &sa, NULL);
 
-    // Configurer le timer périodique
     struct itimerval it;
     it.it_interval.tv_sec = 0;
-    it.it_interval.tv_usec = TICK_USEC; // 10ms
+    it.it_interval.tv_usec = TICK_USEC;
     it.it_value.tv_sec = 0;
     it.it_value.tv_usec = TICK_USEC;
     setitimer(ITIMER_REAL, &it, NULL);
 
-    // Le parent va tourner au moins ~1 minute.
-    // 10ms par tick => 6000 ticks ≈ 60s, donc on arrête après 6000-7000 ticks.
-    while (tick_count < 7000) {
-        // Attendre qu'un tick soit signalé
-        pause();
-
-        // Traiter tous les ticks en attente (au cas où plusieurs signaux sont arrivés)
+    while (tick_count < TICK_USAGE) {
         while (pending_ticks > 0) {
             pending_ticks--;
-            scheduler_tick();
+            if (tick_count < TICK_USAGE) {
+                scheduler_tick();
+            }
         }
+        usleep(1000);
     }
 
-    // Arrêt : tuer les enfants proprement
+    struct itimerval stop = {0};
+    setitimer(ITIMER_REAL, &stop, NULL);
+
     for (int i = 0; i < NCHILD; ++i) {
         kill(pcbs[i].pid, SIGTERM);
     }
@@ -337,6 +329,7 @@ void parent_loop() {
 
     close(log_fd);
 }
+
 
 // ======================= main ===============================
 

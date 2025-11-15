@@ -16,6 +16,7 @@
 #define TIME_QUANTUM    5      // en nombre de ticks
 #define TICK_USEC       10000  // 10 ms par tick (ITIMER_REAL)
 #define MAX_TICKS_LOG   10000  // on ne log que 0..10000
+#define TICK_USAGE		7000
 #define LOG_FILENAME    "schedule_dump.txt"
 
 typedef struct {
