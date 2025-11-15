@@ -2,7 +2,6 @@
 
 
 // ======================= VARIABLES GLOBALES =================
-
 int msgq = -1;
 int log_fd = -1;
 
@@ -10,14 +9,13 @@ pcb_t pcbs[NCHILD];
 queue_t runq;
 queue_t waitq;
 
-volatile sig_atomic_t tick_count = 0;
-volatile sig_atomic_t pending_ticks = 0;   // nombre de ticks à traiter
+volatile sig_atomic_t tick_count   = 0;
+volatile sig_atomic_t pending_ticks = 0;
 
-int current_idx = -1;   // index dans pcbs[] du processus actuellement sur le CPU
-
+int current_idx = -1;       // index dans pcbs[] du process courant
 pid_t parent_pid;
 
-// ======================= QUEUE HELPER =======================
+// ======================= QUEUE HELPERS ======================
 
 void queue_init(queue_t *q) {
     q->head = q->tail = q->size = 0;
@@ -63,10 +61,11 @@ void queue_remove(queue_t *q, int idx) {
         q->items[i] = new_items[i];
 }
 
-// trouver index de pcb à partir du pid
+// trouver index de pcb à partir d’un pid
 int find_pcb_index(pid_t pid) {
     for (int i = 0; i < NCHILD; ++i) {
-        if (pcbs[i].pid == pid) return i;
+        if (pcbs[i].pid == pid)
+            return i;
     }
     return -1;
 }
@@ -117,7 +116,7 @@ void dump_queues() {
 // ======================= TIMER / SIGNAL =====================
 
 void timer_handler(int signo) {
-    // Un tick s'est produit
+    (void)signo;
     tick_count++;
     pending_ticks++;
 }
@@ -125,18 +124,20 @@ void timer_handler(int signo) {
 // ======================= SCHEDULER TICK =====================
 
 void scheduler_tick() {
-    // 1) Mettre à jour I/O des processus en wait-queue
+    printf("Scheduler tick %d\n", tick_count);
+    fflush(stdout);
+    // 1) décrémenter les remaining_io de la wait-queue
     for (int i = 0; i < waitq.size; ++i) {
         int pos = (waitq.head + i) % NCHILD;
         int idx = waitq.items[pos];
-        if (pcbs[idx].remaining_io > 0) {
+        if (pcbs[idx].remaining_io > 0)
             pcbs[idx].remaining_io--;
-        }
     }
 
-    // 2) Si certains ont fini leur I/O, les remettre en run-queue
+    // 2) déplacer ceux qui ont fini leur I/O vers la run-queue
     int finished[NCHILD];
     int finished_count = 0;
+
     for (int i = 0; i < waitq.size; ++i) {
         int pos = (waitq.head + i) % NCHILD;
         int idx = waitq.items[pos];
@@ -144,6 +145,7 @@ void scheduler_tick() {
             finished[finished_count++] = idx;
         }
     }
+
     for (int i = 0; i < finished_count; ++i) {
         int idx = finished[i];
         pcbs[idx].in_io = 0;
@@ -152,82 +154,93 @@ void scheduler_tick() {
         queue_enqueue(&runq, idx);
     }
 
-    // 3) Incrémenter le temps d'attente de tous les process en run-queue
+    // 3) incrémenter le temps d’attente des process en run-queue
     for (int i = 0; i < runq.size; ++i) {
         int pos = (runq.head + i) % NCHILD;
         int idx = runq.items[pos];
         pcbs[idx].waiting_time++;
     }
 
-    // 4) Vérifier si le process courant a encore du quantum
+    // 4) gérer le quantum du process courant
     if (current_idx != -1) {
         if (pcbs[current_idx].in_io) {
-            // par sécurité : si déjà en I/O, on le vire du CPU
+            // par sécurité
             current_idx = -1;
         } else {
             pcbs[current_idx].remaining_quantum--;
             if (pcbs[current_idx].remaining_quantum <= 0) {
-                // fin de quantum, Round-Robin : remettre à la fin de la run-queue
+                // quantum expiré → retour en fin de run-queue
                 queue_enqueue(&runq, current_idx);
                 current_idx = -1;
             }
         }
     }
 
-    // 5) Si aucun process ne tourne, en élire un nouveau
-    if (current_idx == -1) {
-        if (!queue_is_empty(&runq)) {
-            current_idx = queue_dequeue(&runq);
-            pcbs[current_idx].remaining_quantum = TIME_QUANTUM;
-        }
+    // 5) choisir un nouveau process si CPU idle
+    if (current_idx == -1 && !queue_is_empty(&runq)) {
+        current_idx = queue_dequeue(&runq);
+        pcbs[current_idx].remaining_quantum = TIME_QUANTUM;
     }
 
-    // 6) Envoyer un tick CPU au process courant + gérer éventuellement
-    //    les messages d'I/O des enfants
+    // 6) envoyer un tick CPU au process courant (blocant, mais robuste)
     if (current_idx != -1) {
         msgbuf_perso msg;
         memset(&msg, 0, sizeof(msg));
-        msg.mtype = pcbs[current_idx].pid;  // l'enfant écoute sur son pid
-        msg.pid = pcbs[current_idx].pid;
-        msg.io_time = 0; // 0 => simple tick CPU
+        msg.mtype  = pcbs[current_idx].pid;   // l’enfant écoute sur son pid
+        msg.pid    = pcbs[current_idx].pid;
+        msg.io_time = 0;                      // tick CPU simple
 
-        if (msgsnd(msgq, &msg, sizeof(msg), 0) == -1) {
-            // erreur possible si l'enfant est déjà mort, etc.
+        // msgsnd bloquant, on gère EINTR : plus de EAGAIN/EINTR visibles
+        while (1) {
+            if (msgsnd(msgq, &msg, MSGSZ, 0) == -1) {
+                if (errno == EINTR) {
+                    perror("msgsnd (CPU tick) EINTR");
+                    continue;
+                } 
+                // autre erreur = problème sérieux
+                perror("msgsnd (CPU tick)");
+                break;
+            }
+            // printf("Parent sent CPU tick\n");
+            // fflush(stdout);
+            break; // succès
+        }
+    }
+    // 7) traiter les messages d’I/O envoyés par les enfants (mtype = 1)
+    while (1) {
+        msgbuf_perso m;
+        ssize_t ret = msgrcv(msgq, &m, MSGSZ,
+                             1,          // mtype = 1 pour "je pars en I/O"
+                             IPC_NOWAIT);
+        if (ret < 0) {
+            // perror("msgrcv (parent IO)");
+            if (errno == ENOMSG) break;   // plus de messages
+            if (errno == EINTR)  continue;
+            break;
         }
 
-        // Lire les messages des enfants qui finissent leur CPU-burst
-        while (1) {
-            msgbuf_perso m;
-            ssize_t ret = msgrcv(msgq, &m, sizeof(m),
-                                 1,  // mtype = 1 => messages pour le parent
-                                 IPC_NOWAIT);
-            if (ret < 0) {
-                if (errno == ENOMSG) break; // plus de message
-                else break;
+        int idx = find_pcb_index(m.pid);
+        if (idx >= 0) {
+            pcbs[idx].in_io        = 1;
+            pcbs[idx].remaining_io = m.io_time;
+
+            if (idx == current_idx) {
+                current_idx = -1;
+            } else {
+                queue_remove(&runq, idx);
             }
-            int idx = find_pcb_index(m.pid);
-            if (idx >= 0) {
-                // L'enfant m.pid demande une I/O de durée m.io_time
-                pcbs[idx].in_io = 1;
-                pcbs[idx].remaining_io = m.io_time;
-                // S'il était courant, on enlève le CPU
-                if (idx == current_idx) {
-                    current_idx = -1;
-                } else {
-                    queue_remove(&runq, idx);
-                }
-                queue_enqueue(&waitq, idx);
-            }
+            queue_enqueue(&waitq, idx);
         }
     }
 
-    // 7) Logging
+    // 8) Logging
     if (tick_count <= MAX_TICKS_LOG) {
         char buffer[256];
         if (current_idx != -1) {
             snprintf(buffer, sizeof(buffer),
                      "(time %d) process pid=%d gets cpu time, remaining time-quantum=%d\n",
-                     tick_count, pcbs[current_idx].pid, pcbs[current_idx].remaining_quantum);
+                     tick_count, pcbs[current_idx].pid,
+                     pcbs[current_idx].remaining_quantum);
         } else {
             snprintf(buffer, sizeof(buffer),
                      "(time %d) CPU idle\n", tick_count);
@@ -240,94 +253,100 @@ void scheduler_tick() {
 // ======================= CODE DES ENFANTS ===================
 
 void child_loop() {
-    // Chaque enfant simule: CPU-burst -> I/O-burst -> CPU-burst -> ...
     srand(getpid());
 
-    int cpu_burst = rand() % 10 + 5;   // entre 5 et 14 ticks
-    int io_burst  = rand() % 20 + 5;   // entre 5 et 24 ticks
-
+    int cpu_burst = rand() % 10 + 5;   // 5–14 ticks CPU
+    int io_burst  = rand() % 20 + 5;   // 5–24 ticks I/O
+    printf("Child pid=%d starting with cpu_burst=%d, io_burst=%d\n",
+           getpid(), cpu_burst, io_burst);
+    fflush(stdout);
     while (1) {
         msgbuf_perso msg;
-        // Attendre un tick CPU pour ce processus (mtype = pid)
-        if (msgrcv(msgq, &msg, sizeof(msg), getpid(), 0) == -1) {
-            // Erreur ou arrêt, on quitte
-            exit(0);
-        }
 
-        // On a reçu un "time slice" (1 tick CPU)
+        if (msgrcv(msgq, &msg, MSGSZ, getpid(), 0) == -1) {
+            perror("msgrcv child");
+            exit(1);
+        }
+        // printf("Child pid=%d received CPU tick\n", getpid());
+        // fflush(stdout);
         cpu_burst--;
 
         if (cpu_burst <= 0) {
-            // On a fini notre CPU-burst, on demande de l'I/O au parent
+            // envoyer une requête d’I/O au parent
             msgbuf_perso reply;
             memset(&reply, 0, sizeof(reply));
-            reply.mtype = 1;         // messages vers le parent
-            reply.pid = getpid();
+            reply.mtype  = 1;            // messages pour le parent
+            reply.pid    = getpid();
             reply.io_time = io_burst;
-            msgsnd(msgq, &reply, sizeof(reply), 0);
 
-            // On génère le prochain couple (cpu_burst, io_burst)
+            while (1) {
+                if (msgsnd(msgq, &reply, MSGSZ, 0) == -1) {
+                    perror("msgsnd child IO");
+                    if (errno == EINTR)
+                        continue;
+                    break;
+                }
+                break;
+            }
+
+            // générer un nouveau cycle
             cpu_burst = rand() % 10 + 5;
             io_burst  = rand() % 20 + 5;
-
-            // Ensuite, on va simplement continuer à attendre des ticks CPU.
-            // Le parent ne nous enverra plus de messages tant que notre I/O n'est pas terminée.
         }
     }
 }
 
-// ======================= CODE DU PARENT =====================
+// ======================= PARENT LOOP ========================
 
 void parent_loop() {
-    // Ouverture du fichier de log
+    // ouvrir le fichier de log
     log_fd = open(LOG_FILENAME, O_CREAT | O_TRUNC | O_WRONLY, 0644);
     if (log_fd < 0) {
         perror("open log file");
         exit(1);
     }
 
-    // Initialiser les queues
+    // initialiser les queues
     queue_init(&runq);
     queue_init(&waitq);
 
-    // Mettre tous les enfants dans la run-queue au début
+    // mettre tous les enfants en run-queue au début
     for (int i = 0; i < NCHILD; ++i) {
-        pcbs[i].in_io = 0;
-        pcbs[i].remaining_io = 0;
+        pcbs[i].in_io            = 0;
+        pcbs[i].remaining_io     = 0;
         pcbs[i].remaining_quantum = TIME_QUANTUM;
-        pcbs[i].waiting_time = 0;
+        pcbs[i].waiting_time     = 0;
         queue_enqueue(&runq, i);
     }
     current_idx = -1;
 
-    // Installer le handler SIGALRM
+    // installer le handler SIGALRM
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = timer_handler;
+    sa.sa_flags   = SA_RESTART; // redémarre les syscalls quand possible
     sigaction(SIGALRM, &sa, NULL);
 
-    // Configurer le timer périodique
+    // configurer le timer périodique
     struct itimerval it;
-    it.it_interval.tv_sec = 0;
-    it.it_interval.tv_usec = TICK_USEC; // 10ms
-    it.it_value.tv_sec = 0;
-    it.it_value.tv_usec = TICK_USEC;
+    it.it_interval.tv_sec  = 0;
+    it.it_interval.tv_usec = TICK_USEC;
+    it.it_value.tv_sec     = 0;
+    it.it_value.tv_usec    = TICK_USEC;
     setitimer(ITIMER_REAL, &it, NULL);
 
-    // Le parent va tourner au moins ~1 minute.
-    // 10ms par tick => 6000 ticks ≈ 60s, donc on arrête après 6000-7000 ticks.
+    // tourner au moins ~1 minute (10ms * 6000 = 60s)
     while (tick_count < 7000) {
-        // Attendre qu'un tick soit signalé
-        pause();
+        pause(); // attente d’un SIGALRM
 
-        // Traiter tous les ticks en attente (au cas où plusieurs signaux sont arrivés)
+        // traiter tous les ticks en attente
         while (pending_ticks > 0) {
             pending_ticks--;
             scheduler_tick();
         }
     }
 
-    // Arrêt : tuer les enfants proprement
+    // arrêt : tuer les enfants proprement
     for (int i = 0; i < NCHILD; ++i) {
         kill(pcbs[i].pid, SIGTERM);
     }
@@ -335,39 +354,48 @@ void parent_loop() {
         wait(NULL);
     }
 
+    // détruire la file de messages
+    msgctl(msgq, IPC_RMID, NULL);
+
     close(log_fd);
 }
 
-// ======================= main ===============================
+// ============================ main ==========================
 
 int main(int argc, char *argv[]) {
+    (void)argc; (void)argv;
+
     parent_pid = getpid();
 
-    // Créer la file de messages IPC
-    int key = 0x12345; // même clé que dans tes exemples msgq.c/msgrcv.c
+    // créer la file de messages
+    key_t key = 0x12345;
+    int old = msgget(key, 0666);
+    if (old != -1) {
+        msgctl(old, IPC_RMID, NULL);
+    }
     msgq = msgget(key, IPC_CREAT | 0666);
     if (msgq < 0) {
         perror("msgget");
         exit(1);
     }
 
-    // Créer 10 enfants
+    // créer les enfants
     for (int i = 0; i < NCHILD; ++i) {
         pid_t pid = fork();
         if (pid < 0) {
             perror("fork");
             exit(1);
         } else if (pid == 0) {
-            // Enfant
+            // enfant
             child_loop();
             exit(0);
         } else {
-            // Parent : stocker le pid
+            // parent
             pcbs[i].pid = pid;
         }
     }
 
-    // Le processus original devient le "parent/ordonnanceur"
+    // le process original devient le scheduler
     if (getpid() == parent_pid) {
         parent_loop();
     }
