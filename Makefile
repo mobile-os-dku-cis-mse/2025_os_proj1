@@ -9,9 +9,6 @@ CC 			= 	gcc
 NAME		=	os_proj1
 
 SRC			:= sched.c
-SRC			+= msgq.c
-SRC			+= signal.c
-SRC			+= msgrcv.c
 
 VPATH		:=	src/
 

@@ -1,45 +1,5 @@
-// sched.c : simulation d'un ordonnanceur Round-Robin avec 10 processus enfants
+#include "msg.h"
 
-#define _GNU_SOURCE
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <signal.h>
-#include <string.h>
-#include <sys/time.h>
-#include <sys/types.h>
-#include <sys/ipc.h>
-#include <sys/msg.h>
-#include <fcntl.h>
-#include <sys/wait.h>
-#include <errno.h>
-
-#include "msg.h"   // struct msgbuf { int mtype; int pid; int io_time; }
-
-// ======================= PARAMETRES =========================
-
-#define NCHILD          10
-#define TIME_QUANTUM    5      // en nombre de ticks
-#define TICK_USEC       10000  // 10 ms par tick (ITIMER_REAL)
-#define MAX_TICKS_LOG   10000  // on ne log que 0..10000
-#define LOG_FILENAME    "schedule_dump.txt"
-
-// ======================= STRUCTURES =========================
-
-typedef struct {
-    pid_t pid;
-    int in_io;                  // 0 = prêt, 1 = en I/O
-    int remaining_io;           // temps I/O restant (en ticks)
-    int remaining_quantum;      // temps CPU restant dans la time slice courante
-    int waiting_time;           // temps passé à attendre en run-queue (optionnel)
-} pcb_t;
-
-typedef struct {
-    int items[NCHILD];
-    int head;
-    int tail;
-    int size;
-} queue_t;
 
 // ======================= VARIABLES GLOBALES =================
 
@@ -225,7 +185,7 @@ void scheduler_tick() {
     // 6) Envoyer un tick CPU au process courant + gérer éventuellement
     //    les messages d'I/O des enfants
     if (current_idx != -1) {
-        struct msgbuf msg;
+        msgbuf_perso msg;
         memset(&msg, 0, sizeof(msg));
         msg.mtype = pcbs[current_idx].pid;  // l'enfant écoute sur son pid
         msg.pid = pcbs[current_idx].pid;
@@ -237,7 +197,7 @@ void scheduler_tick() {
 
         // Lire les messages des enfants qui finissent leur CPU-burst
         while (1) {
-            struct msgbuf m;
+            msgbuf_perso m;
             ssize_t ret = msgrcv(msgq, &m, sizeof(m),
                                  1,  // mtype = 1 => messages pour le parent
                                  IPC_NOWAIT);
@@ -287,7 +247,7 @@ void child_loop() {
     int io_burst  = rand() % 20 + 5;   // entre 5 et 24 ticks
 
     while (1) {
-        struct msgbuf msg;
+        msgbuf_perso msg;
         // Attendre un tick CPU pour ce processus (mtype = pid)
         if (msgrcv(msgq, &msg, sizeof(msg), getpid(), 0) == -1) {
             // Erreur ou arrêt, on quitte
@@ -299,7 +259,7 @@ void child_loop() {
 
         if (cpu_burst <= 0) {
             // On a fini notre CPU-burst, on demande de l'I/O au parent
-            struct msgbuf reply;
+            msgbuf_perso reply;
             memset(&reply, 0, sizeof(reply));
             reply.mtype = 1;         // messages vers le parent
             reply.pid = getpid();
