@@ -341,6 +341,6 @@ int main(int argc, char *argv[]) {
         parent_loop();
     }
 
-    printf("[INFO] End");
+    printf("[INFO] End\n");
     return 0;
 }
