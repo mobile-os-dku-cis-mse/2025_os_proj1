@@ -22,6 +22,7 @@
 
 const int tick = 100; // µs 마다s
 const int tq = 10;// tq틱 마다 
+const int end_tick = 10000; // 10000틱까지 출력
 // pcb 저장
 typedef struct PCB {
 	int pid;
@@ -56,75 +57,6 @@ typedef struct {
 
 int now_time = 0;
 
-// ---------- 로그 유틸리티 --------------
-
-static int logfd = -1;
-
-static void dump_queues_tick(int fd, int t,
-                             int running_pid, int running_rem_cpu,
-                             queue *run_q, queue *wait_q)
-{
-    char buf[4096];
-    int off = 0;
-
-    if (running_pid >= 0)
-        off += snprintf(buf+off, sizeof(buf)-off,
-            "(at time %d, process %d gets cpu time, remaining cpu-burst=%d)\n",
-            t, running_pid, running_rem_cpu);
-    else
-        off += snprintf(buf+off, sizeof(buf)-off,
-            "(at time %d, IDLE)\n", t);
-
-    // run-queue dump
-    off += snprintf(buf+off, sizeof(buf)-off, "run-queue: ");
-    for (pcb *p = run_q->head; p; p = p->nextNode) {
-        off += snprintf(buf+off, sizeof(buf)-off,
-            "[pid=%d cpu=%d io=%d wt=%d] ",
-            p->pid, p->cpu_burst, p->io_burst, p->waiting_time);
-        if (off >= (int)sizeof(buf)) break;
-    }
-    off += snprintf(buf+off, sizeof(buf)-off, "\n");
-
-    // wait-queue dump
-    off += snprintf(buf+off, sizeof(buf)-off, "wait-queue: ");
-    for (pcb *p = wait_q->head; p; p = p->nextNode) {
-        off += snprintf(buf+off, sizeof(buf)-off,
-            "[pid=%d cpu=%d io=%d wt=%d] ",
-            p->pid, p->cpu_burst, p->io_burst, p->waiting_time);
-        if (off >= (int)sizeof(buf)) break;
-    }
-    off += snprintf(buf+off, sizeof(buf)-off, "\n\n");
-
-    if (off > 0) write(fd, buf, off);
-}
-
-Stat stats[10];
-int stat_i = 0;
-void end_process(pcb *p){
-	stats[stat_i].pid = p->pid;
-	stats[stat_i].waiting = p->waiting_time;
-	stat_i++;
-}
-void dump_stats(void){
-	for(int i = 0; i < 10; i++){
-		printf("PID: %d, waiting time: %d\n", stats[i].pid, stats[i].waiting);
-	}
-}
-static void dump_stats2(int fd){
-    char buf[4096];
-    int off = 0;
-    long sum = 0;
-
-    off += snprintf(buf+off, sizeof(buf)-off, "==== Waiting Time Summary ====\n");
-    for (int i = 0; i < stat_i; i++){
-        off += snprintf(buf+off, sizeof(buf)-off, "pid=%d waiting=%d\n", stats[i].pid, stats[i].waiting);
-        sum += stats[i].waiting;
-        if (off > (int)sizeof(buf)-128) { write(fd, buf, off); off = 0; }
-    }
-    double avg = (stat_i > 0) ? (double)sum / stat_i : 0.0;
-    off += snprintf(buf+off, sizeof(buf)-off, "Average waiting time = %.2f\n\n", avg);
-    if (off > 0) write(fd, buf, off);
-}
 
 // ----------------- 큐 유틸 함수 -------------------
 
@@ -185,8 +117,9 @@ void reduce(queue *wait_q, queue *run_q)
 				done->enter_time = now_time;
                 push(run_q, done);
             } else {
-				end_process(done);
-                free(done);
+				done->cpu_burst = (rand()%1000)+100; 
+				done->io_burst = (rand()%1000)+300;
+				push(run_q, done);
             }
             // 다음 노드로 진행 (prev 그대로)
             cur = next;
@@ -196,6 +129,91 @@ void reduce(queue *wait_q, queue *run_q)
             cur  = cur->nextNode;
         }
     }
+}
+// ---------- 로그 유틸리티 --------------
+
+static int logfd = -1;
+
+static void dump_queues_tick(int fd, int t,
+                             int running_pid, int running_rem_cpu,
+                             queue *run_q, queue *wait_q)
+{
+    char buf[4096];
+    int off = 0;
+
+    if (running_pid >= 0)
+        off += snprintf(buf+off, sizeof(buf)-off,
+            "(at time %d, process %d gets cpu time, remaining cpu-burst=%d)\n",
+            t, running_pid, running_rem_cpu);
+    else
+        off += snprintf(buf+off, sizeof(buf)-off,
+            "(at time %d, IDLE)\n", t);
+
+    // run-queue dump
+    off += snprintf(buf+off, sizeof(buf)-off, "run-queue: ");
+    for (pcb *p = run_q->head; p; p = p->nextNode) {
+        off += snprintf(buf+off, sizeof(buf)-off,
+            "[pid=%d cpu=%d io=%d wt=%d] ",
+            p->pid, p->cpu_burst, p->io_burst, p->waiting_time);
+        if (off >= (int)sizeof(buf)) break;
+    }
+    off += snprintf(buf+off, sizeof(buf)-off, "\n");
+
+    // wait-queue dump
+    off += snprintf(buf+off, sizeof(buf)-off, "wait-queue: ");
+    for (pcb *p = wait_q->head; p; p = p->nextNode) {
+        off += snprintf(buf+off, sizeof(buf)-off,
+            "[pid=%d cpu=%d io=%d wt=%d] ",
+            p->pid, p->cpu_burst, p->io_burst, p->waiting_time);
+        if (off >= (int)sizeof(buf)) break;
+    }
+    off += snprintf(buf+off, sizeof(buf)-off, "\n\n");
+
+    if (off > 0) write(fd, buf, off);
+}
+
+Stat stats[10];
+int stat_i = 0;
+void end_process(pcb *p){
+	stats[stat_i].pid = p->pid;
+	stats[stat_i].waiting = p->waiting_time;
+	stat_i++;
+}
+void dump_stats(void){
+	for(int i = 0; i < 10; i++){
+		printf("PID: %d, waiting time: %d\n", stats[i].pid, stats[i].waiting);
+	}
+}
+static void flush_remaining_to_stats(queue *run_q, queue *wait_q) {
+    pcb *p;
+    while ((p = pop(run_q))) {
+        // 마지막으로 run_queue에 대기한 시간 반영
+        p->waiting_time += (now_time - p->enter_time);
+        end_process(p);
+        free(p);
+    }
+    while ((p = pop(wait_q))) {
+        // wait_queue에도 enter_time 기준 대기시간 누적
+        p->waiting_time += (now_time - p->enter_time);
+        end_process(p);
+        free(p);
+    }
+}
+
+static void dump_stats2(int fd){
+    char buf[4096];
+    int off = 0;
+    long sum = 0;
+
+    off += snprintf(buf+off, sizeof(buf)-off, "==== Waiting Time Summary ====\n");
+    for (int i = 0; i < stat_i; i++){
+        off += snprintf(buf+off, sizeof(buf)-off, "pid=%d waiting=%d\n", stats[i].pid, stats[i].waiting);
+        sum += stats[i].waiting;
+        if (off > (int)sizeof(buf)-128) { write(fd, buf, off); off = 0; }
+    }
+    double avg = (stat_i > 0) ? (double)sum / stat_i : 0.0;
+    off += snprintf(buf+off, sizeof(buf)-off, "Average waiting time = %.2f\n\n", avg);
+    if (off > 0) write(fd, buf, off);
 }
 
 // ------------- 기타 함수 -------------------------
@@ -264,7 +282,7 @@ int main(int argc, char * arg[])
     sigset_t empty; 
 	sigemptyset(&empty);
 
-	while(!isEmpty(&run_queue) || !isEmpty(&wait_queue)){
+	while(now_time < end_tick && (!isEmpty(&run_queue) || !isEmpty(&wait_queue))){
 		if (isEmpty(&run_queue)) {
 			// I/O 완료를 기다림
 			int used_tick = 0;
@@ -315,11 +333,14 @@ int main(int argc, char * arg[])
 				// 자식과 동일하게 1틱 감소 반영(로그용)
 				if (shadow_cpu > 0) shadow_cpu--;
 				reduce(&wait_queue, &run_queue);
+
+				// ── 로그 ──
+				//dump_queues_tick(logfd, now_time, cur->pid, shadow_cpu, &run_queue, &wait_queue);
 				if(shadow_cpu == 0) break;
 			}
-			 // ── 로그 ──
-			dump_queues_tick(logfd, now_time, cur->pid, shadow_cpu, &run_queue, &wait_queue);
 			
+			// ── 로그 ──
+			dump_queues_tick(logfd, now_time, cur->pid, shadow_cpu, &run_queue, &wait_queue);
 			ticksnd.op = 0;
 			if(msgsnd(msgid, &ticksnd, sizeof(cmd) - sizeof(long), 0) == -1 ){
 				perror("parent INIT msgsnd");
@@ -335,18 +356,18 @@ int main(int argc, char * arg[])
 
 			waitpid(pid, NULL, 0);
 
-			if(m.io_burst > 0){ 
-				cur->io_burst = m.io_burst;
-				push(&wait_queue, cur);
-			}else if(m.cpu_burst > 0){ 
+			if(m.cpu_burst > 0){
 				cur->cpu_burst = m.cpu_burst;
 				cur->enter_time = now_time;
 				push(&run_queue, cur);
-			}else{ // io_burst == 0, cpu_burst == 0
-				end_process(cur);
-				free(cur);
+			}else if(m.io_burst > 0){
+				cur->io_burst = m.io_burst;
+				push(&wait_queue, cur);
+			}else{
+				cur->cpu_burst = (rand()%1000)+100; 
+				cur->io_burst = (rand()%1000)+300;
+				push(&run_queue, cur);
 			}
-
 		}else{
 			// child
 
@@ -383,6 +404,9 @@ int main(int argc, char * arg[])
 		}
 	}
 	msgctl(msgid, IPC_RMID, NULL);
+
+	flush_remaining_to_stats(&run_queue, &wait_queue);
+
 	dump_stats();
 	dump_stats2(logfd);
 	// main() 종료 직전
