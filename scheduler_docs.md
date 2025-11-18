@@ -163,10 +163,23 @@ Each scheduling event is logged to `schedule_dump.txt`:
 
 ## Compilation and Execution
 
-```bash
-gcc -o scheduler RR_scheduler_sim.c
+#### Create a build folder and navigate to it
+```shell
+mkdir build && cd build
+```
+#### Run cmake
+```shell
+cmake ..
+```
+#### Compile the project
+```shell
+make
+```
+#### Run the program
+```shell
 ./scheduler
 ```
+
 
 **Runtime**: 60 seconds  
 **Output**: First 10,000 ticks logged to `schedule_dump.txt`
