@@ -10,7 +10,7 @@
 scheduler global_scheduler;
 volatile sig_atomic_t global_timeout = false;
 
-void timer_signal_handler(int signo) {
+void timer_signal_handler() {
     global_timeout = true;
 }
 
@@ -88,7 +88,7 @@ void create_child_processes(scheduler *sched) {
     printf("All child processes created successfully.\n\n");
 }
 
-int main(int argc, char *argv[]) {
+int main() {
     srand(time(NULL));
     
     init_scheduler(&global_scheduler);

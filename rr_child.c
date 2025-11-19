@@ -5,7 +5,7 @@
 
 volatile sig_atomic_t child_should_terminate = 0;
 
-void child_signal_handler(int signo) {
+void child_signal_handler() {
 }
 
 void child_process_main(int msgqid, pid_t my_pid) {

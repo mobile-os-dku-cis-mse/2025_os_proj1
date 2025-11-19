@@ -138,8 +138,8 @@ void dump_wait_queue(FILE *fp, const wait_queue *queue);
 void print_final_statistics(const scheduler *sched);
 
 void setup_signal_handlers(void);
-void timer_signal_handler(int signo);
-void child_signal_handler(int signo);
+void timer_signal_handler();
+void child_signal_handler();
 
 extern volatile sig_atomic_t global_timeout;
 extern scheduler global_scheduler;

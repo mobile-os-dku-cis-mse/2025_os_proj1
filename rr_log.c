@@ -61,7 +61,7 @@ void log_scheduling_event(scheduler *scheduler) {
 
 void dump_ready_queue(FILE *fp, const ready_queue *queue) {
     char buffer[256];
-    int offset = 0;
+    long unsigned offset = 0;
     
     offset += snprintf(buffer + offset, sizeof(buffer) - offset,
                       "run-queue[%d]: ", queue->count);
@@ -90,7 +90,7 @@ void dump_ready_queue(FILE *fp, const ready_queue *queue) {
 
 void dump_wait_queue(FILE *fp, const wait_queue *queue) {
     char buffer[256];
-    int offset = 0;
+    long unsigned offset = 0;
     
     offset += snprintf(buffer + offset, sizeof(buffer) - offset,
                       "wait-queue[%d]: ", queue->count);
